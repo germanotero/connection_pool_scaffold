@@ -1,9 +1,15 @@
-package com.opower.connectionpool.impl;
+package com.opower.connectionpool;
 
 import java.sql.SQLException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+import com.opower.connectionpool.exceptions.ConnectionPoolException;
+/**
+ * Connection Pool Manager, this is the manager of the pool, the one that starts a monitor thread over the pool
+ * @author German Otero
+ *
+ */
 public class ConnectionPoolManager {
 
 	private Long evictInterval;
@@ -13,7 +19,7 @@ public class ConnectionPoolManager {
 	private ConnectionPoolImpl pool;
 	private ExecutorService es;
 
-	public ConnectionPoolManager(ConnectionPoolImpl pool, Long evictInterval) {
+	ConnectionPoolManager(ConnectionPoolImpl pool, Long evictInterval) {
 		this.pool = pool;
 		this.evictInterval = evictInterval;
 		this.es = Executors.newSingleThreadExecutor();
@@ -25,10 +31,14 @@ public class ConnectionPoolManager {
 		}
 
 		this.active = true;
-		es.execute(new ManagerRunnable());
+		es.execute(new MonitorRunnable());
 	}
-
-	private class ManagerRunnable implements Runnable {
+	/**
+	 * Monitor for the connections pool
+	 * @author German Otero
+	 *
+	 */
+	private class MonitorRunnable implements Runnable {
 
 		@Override
 		public void run() {
@@ -47,5 +57,5 @@ public class ConnectionPoolManager {
 	public void stop() {
 		this.active = false;
 	}
-
+	
 }

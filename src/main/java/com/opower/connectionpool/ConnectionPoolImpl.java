@@ -1,4 +1,4 @@
-package com.opower.connectionpool.impl;
+package com.opower.connectionpool;
 
 import java.lang.reflect.Proxy;
 import java.sql.Connection;
@@ -10,9 +10,9 @@ import java.util.concurrent.locks.ReentrantLock;
 
 import org.apache.log4j.Logger;
 
-import com.opower.connectionpool.ConnectionPool;
 import com.opower.connectionpool.connection.DefaultPooledConnection;
 import com.opower.connectionpool.connection.PooledConnectionInvocationHandler;
+import com.opower.connectionpool.exceptions.ConnectionPoolException;
 
 /**
  * Implementation of the interface for the Database Connection Pool
@@ -24,7 +24,6 @@ public class ConnectionPoolImpl implements ConnectionPool {
 	private final Logger logger = Logger.getLogger(ConnectionPoolImpl.class);
 	private ConnectionPoolDataSourceImpl dataSource;
 
-	private Integer idleWaitTimeout = 1000;
 	private Integer validTimeout = 1000;
 
 	private Integer minPoolSize;
@@ -42,7 +41,6 @@ public class ConnectionPoolImpl implements ConnectionPool {
 	private BlockingQueue<DefaultPooledConnection> activeConnections;
 	private BlockingQueue<DefaultPooledConnection> idleConnections;
 
-	// TODO change the order of the parameters
 	public ConnectionPoolImpl(String url, String user, String password, Integer initialPoolSize, Integer minPoolSize,
 			Integer maxPoolSize, Long idleTimeout, Long abandonedTimeout) {
 		checkParameters(initialPoolSize, minPoolSize, maxPoolSize);
@@ -56,8 +54,8 @@ public class ConnectionPoolImpl implements ConnectionPool {
 		this.minPoolSize = minPoolSize;
 		this.maxPoolSize = maxPoolSize;
 
-		idleConnections = new ArrayBlockingQueue<DefaultPooledConnection>(maxPoolSize, true);
-		activeConnections = new ArrayBlockingQueue<DefaultPooledConnection>(maxPoolSize, true);
+		idleConnections = new ArrayBlockingQueue<DefaultPooledConnection>(maxPoolSize);
+		activeConnections = new ArrayBlockingQueue<DefaultPooledConnection>(maxPoolSize);
 	}
 
 	/**
@@ -74,9 +72,7 @@ public class ConnectionPoolImpl implements ConnectionPool {
 		if (initialPoolSize < minPoolSize) {
 			throw new IllegalArgumentException("Initial pool size, can't be lower than Min pool size");
 		}
-		if (minPoolSize > maxPoolSize) {
-			throw new IllegalArgumentException("Min pool size, can't be higher than Max pool size");
-		}
+
 	}
 
 	/**
@@ -110,7 +106,7 @@ public class ConnectionPoolImpl implements ConnectionPool {
 			// cast because I'm 100% sure this is the class and I need the touch
 			// method.
 			((DefaultPooledConnection) pooledConnection).touch();
-			if (!pooledConnection.getConnection().isValid(this.idleWaitTimeout)) {
+			if (!pooledConnection.getConnection().isValid(this.validTimeout)) {
 				if (logger.isDebugEnabled()) {
 					logger.debug("Trying to return a pooled connection but was invalid");
 				}
@@ -149,13 +145,20 @@ public class ConnectionPoolImpl implements ConnectionPool {
 	}
 
 	/**
-	 * Release this connection back into the pool
+	 * Release this connection back into the pool, if the connection is not
+	 * handled by this pool, the connection will be closed, and warnings will be
+	 * logged.
 	 * 
 	 * @param Connection
 	 */
 	public void releaseConnection(Connection connection) throws SQLException {
-		DefaultPooledConnection pooledConnection = ((PooledConnectionInvocationHandler) Proxy
-				.getInvocationHandler(connection)).getPooledConnection();
+		DefaultPooledConnection pooledConnection = null;
+		try {
+			pooledConnection = ((PooledConnectionInvocationHandler) Proxy.getInvocationHandler(connection))
+					.getPooledConnection();
+		} catch (Exception e) {
+			logger.warn("Trying to release a non proxy connection..", e);
+		}
 		if (pooledConnection != null) {
 			lock.lock();
 			pooledConnection.touch();
@@ -165,6 +168,7 @@ public class ConnectionPoolImpl implements ConnectionPool {
 					if (logger.isDebugEnabled()) {
 						logger.debug("Releasing a connection that was closed or invalid, it will be removed from the pool");
 					}
+					// review this
 					this.fillIdle(minPoolSize);
 				} else {
 					activeConnections.remove(pooledConnection);
@@ -193,8 +197,7 @@ public class ConnectionPoolImpl implements ConnectionPool {
 		try {
 			for (DefaultPooledConnection pooledConnection : this.activeConnections) {
 				Long inactiveTime = System.currentTimeMillis() - pooledConnection.getLastTouch();
-				removeIfInvalidOrClosed(pooledConnection);
-				if (inactiveTime > this.abandonedTimeout) {
+				if ((inactiveTime > this.abandonedTimeout) && !removeIfInvalidOrClosed(pooledConnection)) {
 					pooledConnection.releaseFromProxy();
 					moveToIdle(pooledConnection);
 				}
@@ -203,11 +206,11 @@ public class ConnectionPoolImpl implements ConnectionPool {
 			for (DefaultPooledConnection connection : this.idleConnections) {
 				Long idleTime = System.currentTimeMillis() - connection.getLastTouch();
 				removeIfInvalidOrClosed(connection);
-				if (idleTime > this.idleTimeout) {
+				if ((idleTime > this.idleTimeout) && !removeIfInvalidOrClosed(connection)) {
 					this.doRemoveConnection(connection);
 				}
 			}
-			int fillSize = minPoolSize - this.activeConnections.size();
+			int fillSize = minPoolSize - this.idleConnections.size();
 			if (fillSize > 0) {
 				fillIdle(fillSize);
 			}
@@ -226,7 +229,8 @@ public class ConnectionPoolImpl implements ConnectionPool {
 		try {
 			if (activeConnections.remove(connection) || idleConnections.remove(connection)) {
 				currentPoolSize--;
-				addOneToIdle();
+				if (currentPoolSize < minPoolSize)
+					addOneToIdle();
 			}
 		} finally {
 			lock.unlock();
@@ -277,14 +281,20 @@ public class ConnectionPoolImpl implements ConnectionPool {
 
 	}
 
-	private void removeIfInvalidOrClosed(DefaultPooledConnection connection) {
+	/**
+	 * Remove the connection if it was invalid or closed, and returns true if
+	 * the connection was removed and false otherwise
+	 */
+	private boolean removeIfInvalidOrClosed(DefaultPooledConnection connection) {
 		try {
 			if (!this.isValid(connection) || connection.isClosed()) {
 				this.doRemoveConnection(connection);
+				return true;
 			}
 		} catch (SQLException e) {
 			logger.warn("Exception during validation of a connection, the connection will be removed from the pool", e);
 		}
+		return false;
 	}
 
 	private boolean isValid(DefaultPooledConnection connection) throws SQLException {
@@ -292,11 +302,7 @@ public class ConnectionPoolImpl implements ConnectionPool {
 	}
 
 	private DefaultPooledConnection pollIdleConnection() {
-		try {
-			return this.idleConnections.poll(this.idleWaitTimeout, TimeUnit.MILLISECONDS);
-		} catch (InterruptedException e) {
-			throw new ConnectionPoolException("Error geting an iddle connection", e);
-		}
+		return this.idleConnections.poll();
 	}
 
 	/**

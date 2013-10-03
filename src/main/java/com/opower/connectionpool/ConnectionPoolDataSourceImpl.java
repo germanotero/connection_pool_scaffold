@@ -1,4 +1,4 @@
-package com.opower.connectionpool.impl;
+package com.opower.connectionpool;
 
 import java.io.PrintWriter;
 import java.sql.DriverManager;

@@ -1,4 +1,4 @@
-package com.opower.connectionpool.impl;
+package com.opower.connectionpool;
 
 import javax.sql.ConnectionEvent;
 import javax.sql.ConnectionEventListener;

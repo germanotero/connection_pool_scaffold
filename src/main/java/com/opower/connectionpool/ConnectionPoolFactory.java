@@ -8,8 +8,6 @@ import org.apache.commons.lang.StringUtils;
 import org.apache.commons.lang.math.NumberUtils;
 
 import com.opower.connectionpool.exceptions.ConfigurationLoadException;
-import com.opower.connectionpool.impl.ConnectionPoolImpl;
-import com.opower.connectionpool.impl.ConnectionPoolManager;
 /**
  * Connection pool factory, this factory will create a poll.
  * 
@@ -24,6 +22,8 @@ public enum ConnectionPoolFactory {
 	
 	// instance of the pool
 	private ConnectionPoolImpl _pool;
+	private ConnectionPoolManager manager;
+	
 	
 	ConnectionPoolFactory() {
 		Properties prop = new Properties();
@@ -48,7 +48,8 @@ public enum ConnectionPoolFactory {
 							parseLong(prop, ConfigurationProperties.idleTimeout.name()),
 							parseLong(prop, ConfigurationProperties.abandonedTimeout.name()));
 		
-		new ConnectionPoolManager(_pool, Long.parseLong(prop.getProperty(ConfigurationProperties.evictTime.name())));
+		Long evictTime = Long.parseLong(prop.getProperty(ConfigurationProperties.evictTime.name()));
+		this.manager = new ConnectionPoolManager(_pool, evictTime);
 		 
 	}
 	/**
@@ -57,6 +58,10 @@ public enum ConnectionPoolFactory {
 	 */
 	public ConnectionPool get() {
 		return _pool;
+	}
+	
+	public ConnectionPoolManager getManager() {
+		return manager;
 	}
 	
 	public Long parseLong(Properties prop, String property) {

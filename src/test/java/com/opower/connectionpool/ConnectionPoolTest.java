@@ -1,36 +1,25 @@
 package com.opower.connectionpool;
 
 import static junit.framework.Assert.assertEquals;
+import static junit.framework.Assert.assertFalse;
 import static junit.framework.Assert.assertNotNull;
+import static junit.framework.Assert.assertTrue;
 import static junit.framework.Assert.fail;
-import static org.easymock.EasyMock.createMockBuilder;
 
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.List;
 
-import org.easymock.EasyMock;
 import org.junit.After;
-import org.junit.Before;
 import org.junit.Test;
 
 import com.google.common.collect.Lists;
+import com.opower.connectionpool.exceptions.ConnectionPoolException;
 import com.opower.connectionpool.exceptions.PooledConnectionException;
-import com.opower.connectionpool.impl.ConnectionPoolDataSourceImpl;
-import com.opower.connectionpool.impl.ConnectionPoolException;
-import com.opower.connectionpool.impl.ConnectionPoolImpl;
 
 public class ConnectionPoolTest {
 
 	List<Connection> connections = Lists.newArrayList();
-
-	@Before
-	public void before() throws SecurityException, NoSuchMethodException, SQLException {
-		ConnectionPoolDataSourceImpl connectionPoolDatasource = createMockBuilder(ConnectionPoolDataSourceImpl.class)
-				.addMockedMethod(ConnectionPoolDataSourceImpl.class.getMethod("getPooledConnection", new Class[0]))
-				.createMock();
-		EasyMock.expect(connectionPoolDatasource.getPooledConnection()).andReturn(null);
-	}
 
 	@After
 	public void after() throws SQLException {
@@ -116,7 +105,7 @@ public class ConnectionPoolTest {
 		Connection conn = pool.getConnection();
 		conn.toString();
 		try {
-			Thread.sleep(35000);
+			Thread.sleep(35 * 1000); // 35 secs
 		} catch (InterruptedException e) {
 			e.printStackTrace();
 		}
@@ -124,8 +113,28 @@ public class ConnectionPoolTest {
 			conn.clearWarnings();
 			fail("There should have throw an exception");
 		} catch (PooledConnectionException e) {
-			System.out.println(e.getMessage());
+			assertEquals(
+					"The connection you are trying to access has been grabed by the pool because of a timeout. You need to get a new one",
+					e.getMessage());
 		}
+	}
 
+	@Test
+	public void testUserClose() throws SQLException {
+		ConnectionPool pool = ConnectionPoolFactory.INSTANCE.get();
+		assertNotNull(pool);
+		Connection conn = pool.getConnection();
+		conn.close();
+		pool.releaseConnection(conn);
+
+		try {
+			conn = pool.getConnection();
+			assertFalse(conn.isClosed());
+			assertTrue(conn.isValid(100000));
+			connections.add(conn);
+		} catch (Exception e) {
+			// ok
+		}
 	}
 }
+	

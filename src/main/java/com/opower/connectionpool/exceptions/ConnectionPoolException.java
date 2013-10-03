@@ -1,4 +1,4 @@
-package com.opower.connectionpool.impl;
+package com.opower.connectionpool.exceptions;
 
 public class ConnectionPoolException extends RuntimeException {
 

@@ -11,8 +11,6 @@ public enum ConfigurationProperties {
 	password,
 	minPoolSize,
 	maxPoolSize,
-	connectionTimeout,
-	pollTimeout, 
 	initialPoolSize, 
 	idleTimeout, 
 	abandonedTimeout, 
